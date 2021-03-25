@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 from video_handler import VideoHandler
+from sklearn.linear_model import Ridge
 from sklearn.linear_model import RANSACRegressor
 from sklearn.preprocessing import PolynomialFeatures
 
@@ -14,7 +15,6 @@ class LaneDetectionHandler(VideoHandler):
         self.ideal_cam_mat, _ = cv2.getOptimalNewCameraMatrix(self.K, self.D,(w,h), 1, (w,h))
         
     def set_projective_transform(self, selected_corners):
-        # h, w = self.get_img_shape()
         h, w = self.lane_output_shape
         start_x, end_x = int(.3*w), int(.5*w)
         start_y, end_y = 0, int(.5*h)
@@ -50,7 +50,7 @@ class LaneDetectionHandler(VideoHandler):
         print("Select V to set the image to a new image and x to reset selection.")
         print("Lastly select Q to quit. If four corners are chosen, the program will print the selected corners.")
         
-        n = 1
+        n = 0
         img = self.get_frame_n(n)        
         h, w = img.shape[:2]
         circle_x = w//2
@@ -118,11 +118,11 @@ class LaneDetection:
         frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         cv2.imshow("gray", frame_gray)
 
-        kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
+        kernel = 1.2*np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
         frame_t = cv2.filter2D(frame_gray, -1, kernel)
         cv2.imshow("blurred", frame_t)
         
-        _, frame_t = cv2.threshold(frame_gray, 200, 255, cv2.THRESH_BINARY)
+        _, frame_t = cv2.threshold(frame_gray, 210, 255, cv2.THRESH_BINARY)
         cv2.imshow("thresh", frame_t)
         
         white_px = np.argwhere(frame_t)
@@ -133,7 +133,7 @@ class LaneDetection:
         sorted_white_px = white_px[sorted_white_px_bool]
         # frame[sorted_white_px[:,0], sorted_white_px[:,1]] = (0,0,255)
         
-        _, w = frame_gray.shape
+        h, w = frame_gray.shape
         right_sorted_white_px_bool = sorted_white_px[:,1] > w//2
         left_sorted_white_px_bool = np.invert(right_sorted_white_px_bool)
         
@@ -143,7 +143,31 @@ class LaneDetection:
         # frame[right_sorted_white_px[:,0], right_sorted_white_px[:,1]] = (0,0,255)
         # frame[left_sorted_white_px[:,0], left_sorted_white_px[:,1]] = (0,255,0)
         
+        poly_ft = PolynomialFeatures(2)
+        all_y = np.array(range(h))
+        X_all_y = poly_ft.fit_transform(all_y.reshape(-1,1))
         
+        right_poly = poly_ft.fit_transform(right_sorted_white_px[:, 0].reshape(-1,1))
+        right_fit = RANSACRegressor(residual_threshold=2, base_estimator=Ridge(alpha=1)).fit(right_poly, right_sorted_white_px[:, 1])
+        right_predict = right_fit.predict(X_all_y)
+        right_predict = np.round(right_predict).astype(int, copy=False)
+        print(right_poly)
+        print(right_predict)
+        try:
+            frame[all_y, right_predict] = (0,0,255)
+        except IndexError:
+            pass
+
+        left_poly = poly_ft.fit_transform(left_sorted_white_px[:, 0].reshape(-1,1))
+        left_fit = RANSACRegressor(residual_threshold=2, base_estimator=Ridge(alpha=1)).fit(left_poly, left_sorted_white_px[:, 1])
+        left_predict = left_fit.predict(X_all_y)
+        left_predict = np.round(left_predict).astype(int, copy=False)
+        print(all_y)
+        print(left_predict)
+        try:
+            frame[all_y, left_predict] = (0,0,255)
+        except IndexError:
+            pass
 
         return frame
 
