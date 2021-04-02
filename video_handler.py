@@ -1,6 +1,8 @@
 import cv2
 from os import system
 
+from typing_extensions import final
+
 # This class handles simple image and video tasks
 class VideoBuffer():
     def __init__(self, framerate = 100, scale_percent=100):
@@ -16,13 +18,13 @@ class VideoBuffer():
         if video_name[-4:] != '.avi':
             video_name = video_name + '.avi'
         
-        videowriter = cv2.VideoWriter(video_name, cv2.VideoWriter_fourcc(*'DIVX'),self.framerate , size, isColor)
+        videowriter = cv2.VideoWriter(video_name, cv2.VideoWriter_fourcc(*'DIVX'), self.framerate, size, isColor)
         for f in self.frames:
             videowriter.write(f)
         videowriter.release()
 
 class VideoHandler:
-    def __init__(self, video_name, scale_percent=100) -> None:
+    def __init__(self, video_name, video_out_name, scale_percent=100, framerate=10) -> None:
         system('cls')
         self.video_feed = cv2.VideoCapture(video_name)
         self.scale_percent = scale_percent
@@ -31,6 +33,8 @@ class VideoHandler:
         self.video_feed.set(cv2.CAP_PROP_POS_FRAMES, 0)
         frame = self.resize_frame(frame, self.scale_percent)
         self.shape = frame.shape[:2]
+        self.video_out_name = video_out_name
+        self.framerate = framerate
         
     @staticmethod
     def gen_video_frm_imgs(vid_name, img_rel_folder, name_char_len, last_num, img_type = '.png', framerate=10):
@@ -79,6 +83,7 @@ class VideoHandler:
         return ret, frame
     
     def run(self, body):
+        buffer = VideoBuffer(self.framerate, 50)
         wait = 0
         try:
             while True:
@@ -87,7 +92,8 @@ class VideoHandler:
                 if not ret:
                     break
             
-                body(frame)
+                frame_processed = body(frame)
+                buffer.frames.append(frame_processed)
                 
                 k = cv2.waitKey(wait) & 0xff
                 if k == ord('q'):
@@ -99,6 +105,8 @@ class VideoHandler:
                         wait = 0
         except KeyboardInterrupt:
             pass
+        finally:
+            buffer.save(self.video_out_name, True)
             
     def __del__(self):
         self.video_feed.release()
