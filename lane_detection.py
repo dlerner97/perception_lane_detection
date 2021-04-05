@@ -3,8 +3,6 @@ import cv2
 import sys
 import numpy as np
 from os import system
-
-from numpy.core.fromnumeric import argmax
 from video_handler import VideoHandler
 from sklearn.linear_model import RANSACRegressor
 from sklearn.preprocessing import PolynomialFeatures
@@ -322,12 +320,11 @@ class LaneDetection:
 
 #<=============================== Main ===================================>#
 if __name__ == "__main__":
-    system('cls')
+    # system('cls')
     
     # Run easier video, vid1
     if len(sys.argv) == 1:
         print("Starting the vid1 lane detection.")
-        print("Select toggle 's' to pause/unpause the video between each frame")
         
         vid_name = 'data_1/data_vid1.avi'
         video_out_name = 'data_vid1_lanes'
@@ -382,7 +379,6 @@ if __name__ == "__main__":
         # Run the challenge video lane detection
         else:
             print("Starting the challenge video lane detection.")
-            print("Select toggle 's' to pause/unpause the video between each frame")
             
             # Harder video
             vid_name = 'data_2/challenge_video.mp4'
