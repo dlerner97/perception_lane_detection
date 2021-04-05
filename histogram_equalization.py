@@ -53,9 +53,8 @@ if __name__ == "__main__":
     
     def body(frame):
         cv2.imshow("orig frame", frame)
-        frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)        
         frame = hist_equal.equalize_frame(frame_gray)
-        cv2.imshow("frame", frame)
         return frame
     
     handle.run(body)

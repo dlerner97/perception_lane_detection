@@ -13,6 +13,7 @@ class LaneDetectionHandler(VideoHandler):
     """
     Lane Detection Handler
     Parent: Video Handler
+    
     args: (video name, output vid name, frame scale factor, cam cal matrix, cam distortion vector, lane output shape)
     
     Handles all processes for the lane detection (e.g. frame preprocessing, etc.) except for computer vision pipeline.
