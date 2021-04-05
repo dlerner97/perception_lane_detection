@@ -9,28 +9,28 @@ The lane_detection.py script handles multiple functions. Firstly, it runs the co
 Please follow the terminal instructions once a program is run.
 
 To run the lane detection script, run
-'''bash
+```bash
 lane_detection.py
-'''
+```
 with the following command line arguments:
 
 1. Run lane detection on the non-challenge video:
-'''bash
+```bash
 python lane_detection.py
-'''
+```
 2. Run lane detection on challenge video:
-'''bash
+```bash
 python lane_detection.py challenge
-'''
+```
 3. Execute manual corner finder on non-challenge video:
-'''bash
+```bash
 python lane_detection.py def_lane_corners
-'''
+```
 4. Execute manual corner finder on challenge video:
-'''bash
+```bash
 python lane_detection.py challenge def_lane_corners
-'''
+```
 5. Generate non-challenge video from its images:
-'''bash
+```bash
 python lane_detection.py gen_video
-'''
+```
