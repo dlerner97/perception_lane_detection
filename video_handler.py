@@ -25,7 +25,6 @@ class VideoBuffer():
 
 class VideoHandler:
     def __init__(self, video_name, video_out_name, scale_percent=100, framerate=10) -> None:
-        system('cls')
         self.video_feed = cv2.VideoCapture(video_name)
         self.scale_percent = scale_percent
         
@@ -84,7 +83,7 @@ class VideoHandler:
     
     def run(self, body):
         buffer = VideoBuffer(self.framerate, 50)
-        wait = 0
+        wait = 1
         try:
             while True:
                 ret, frame = self.get_next_frame()

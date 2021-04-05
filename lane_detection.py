@@ -1,11 +1,25 @@
+#<=============================== Imports ===================================>#
 import cv2
+import sys
 import numpy as np
 from os import system
+
+from numpy.core.fromnumeric import argmax
 from video_handler import VideoHandler
 from sklearn.linear_model import RANSACRegressor
 from sklearn.preprocessing import PolynomialFeatures
 
+#<=============================== LaneDetectionHandler Class Definition ===================================>#
 class LaneDetectionHandler(VideoHandler):
+    
+    """
+    Lane Detection Handler
+    Parent: Video Handler
+    args: (video name, output vid name, frame scale factor, cam cal matrix, cam distortion vector, lane output shape)
+    
+    Handles all processes for the lane detection (e.g. frame preprocessing, etc.) except for computer vision pipeline.
+    """
+    
     def __init__(self, video_name, video_out_name, scale_percent, K, D, lane_output_shape=None) -> None:
         super().__init__(video_name, video_out_name, scale_percent=scale_percent)
         self.K = K
@@ -21,6 +35,7 @@ class LaneDetectionHandler(VideoHandler):
             
         self.ideal_cam_mat, _ = cv2.getOptimalNewCameraMatrix(self.K, self.D,(w,h), 1, (w,h))
         
+    # Calculates the homography matrix 
     def set_projective_transform(self, selected_corners, bounds_x, bounds_y):
         h, w = self.lane_output_shape 
         
@@ -31,21 +46,23 @@ class LaneDetectionHandler(VideoHandler):
         birds_eye_corners = np.float32([[bounds_x[0],bounds_y[1]], [bounds_x[1], bounds_y[1]], [bounds_x[1], bounds_y[0]], [bounds_x[0], bounds_y[0]]])
         self.M = cv2.getPerspectiveTransform(selected_corners, birds_eye_corners)
     
+    # Applies the homography matrix on a frame
     def apply_projective_transform(self, img):
         return cv2.warpPerspective(img, self.M, self.lane_output_shape)[::-1,:]
     
+    # Undistorts an image based on its distortion parameters
     def undistort(self, img):
         return cv2.undistort(img, self.K, self.D, None, self.ideal_cam_mat)
     
+    # Gets the nth frame
     def get_frame_n(self, frame_num):
         return self.undistort(super().get_frame_n(frame_num))
     
+    # Gets the next frame in the video buffer 
     def get_next_frame(self):
         ret, frame = super().get_next_frame()
         frame_cp = None
-        try:
-            cv2.imshow("frame", frame)
-                        
+        try:                       
             frame = self.undistort(frame)
             frame_cp = frame.copy()   
             frame = self.apply_projective_transform(frame)
@@ -55,6 +72,7 @@ class LaneDetectionHandler(VideoHandler):
         finally:
             return ret, (frame, frame_cp, self.M)
     
+    # Runs program to select custom lane corners.
     def get_lane_corners(self, scale=200, n=0):
         print("Please select four corners for homography in the clockwise direction.")
         print("Use W/A/S/D to move the circle and set the four corners.")
@@ -123,7 +141,17 @@ class LaneDetectionHandler(VideoHandler):
         except KeyboardInterrupt:
             return
 
+#<=============================== LaneDetection Class Definition ===================================>#
 class LaneDetection:
+    
+    """
+    Lane Detection Class
+    
+    args(desired number of y-lines to take from histogram, color threshold, approximate middle of the lane, whether or not there's grass)
+    
+    Computer vision/lane detection algorithm
+    """    
+    
     def __init__(self, desired_maxes = 50, threshold=220, mid_per=.6, grass=False) -> None:
         self.approx_perp_dist = None
         self.desired_maxes = desired_maxes
@@ -132,13 +160,17 @@ class LaneDetection:
         self.grass = grass
     
     def detect_lanes(self, frame_info):
+        # Parse passed in parameters
         M = frame_info[-1]
         orig_frame = frame_info[1]
         frame = frame_info[0]
         
         h, w = frame.shape[:2]                   
         
+        # Convert img to HSV
         frame_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        
+        # Threshold img to get lane candidates
         frame_t_white = cv2.inRange(frame_hsv, (0, 0, self.threshold), (255, 255, 255))
         frame_t = None
         
@@ -148,17 +180,20 @@ class LaneDetection:
         else:
             frame_t = frame_t_white
 
-        cv2.imshow("frmae", frame)
-        cv2.imshow("thresh", frame_t)
+        # cv2.imshow("frmae", frame)
+        # cv2.imshow("thresh", frame_t)
         # cv2.waitKey(0)
               
+        # Generate historgram of lane candidates among vertical lines
         white_px = np.argwhere(frame_t)
         unique, counts = np.unique(white_px[:,1], return_counts=True)
         arg_maxes = np.argsort(-counts, 0)
+        
+        # Select the desired_maxes vertical lines with the most lane candidates
         sorted_white_px_bool = np.isin(white_px[:, 1], unique[arg_maxes[:self.desired_maxes]])
         sorted_white_px = white_px[sorted_white_px_bool]
         
-        h, w = frame_t.shape
+        # Differentiate between left lane pixels and right lane pixels
         right_sorted_white_px_bool = sorted_white_px[:,1] > self.mid_per*w
         left_sorted_white_px_bool = np.invert(right_sorted_white_px_bool)
         
@@ -168,6 +203,7 @@ class LaneDetection:
         frame[right_sorted_white_px[:,0], right_sorted_white_px[:,1]] = [0,0,255]
         frame[left_sorted_white_px[:,0], left_sorted_white_px[:,1]] = [255,0,0]
         
+        # Apply polynomial regression
         poly_ft = PolynomialFeatures(2)
         all_y = np.array(range(h))
         X_all_y = poly_ft.fit_transform(all_y.reshape(-1,1))
@@ -176,6 +212,7 @@ class LaneDetection:
         left_avg_x = 5000
         
         try:
+            # Run parabolic RANSAC estimator on right side pixels
             right_poly = poly_ft.fit_transform(right_sorted_white_px[:, 0].reshape(-1,1))
             right_fit = RANSACRegressor(residual_threshold=5).fit(right_poly, right_sorted_white_px[:, 1])
             right_predict = right_fit.predict(X_all_y)
@@ -185,6 +222,7 @@ class LaneDetection:
             pass
 
         try:
+            # Run parabolic RANSAC estimator on left side pixels
             left_poly = poly_ft.fit_transform(left_sorted_white_px[:, 0].reshape(-1,1))
             left_fit = RANSACRegressor(residual_threshold=5).fit(left_poly, left_sorted_white_px[:, 1])
             left_predict = left_fit.predict(X_all_y)
@@ -193,18 +231,18 @@ class LaneDetection:
         except ValueError:
             pass
         
+        # To ensure that car doesn't follow false lane estimation, threshold the distance between 2 lanes.
         dist = abs(left_avg_x - right_avg_x)
         if self.approx_perp_dist == None:
             self.approx_perp_dist = dist
-            
-        # cv2.waitKey(0)
-        
+                    
         text = "Cannot Detect Lanes"
         text_x = w//2-170
         if abs(dist - self.approx_perp_dist) < 80:    
             left_worked = False
             right_worked = False
             
+            # Color lane pixels
             try:
                 frame[all_y, right_predict] = [0,0,255]
                 right_worked = True
@@ -218,9 +256,11 @@ class LaneDetection:
                 pass
             
             if left_worked and right_worked:
+                # Estimate lane center
                 left_right = np.vstack((left_predict, right_predict))
                 center_predict = np.mean(left_right, axis=0).astype(np.uint16, copy=False)
                 
+                # Determine text
                 text_x = w//2-40
                 curve = int(center_predict[0]) - int(center_predict[h//2])
                 if abs(curve) < 20:
@@ -230,6 +270,7 @@ class LaneDetection:
                 else:
                     text = "Turning left"
                 
+                # Backpropogation onto image
                 prev_arrow = False
                 arr_res = 10
                 
@@ -247,8 +288,8 @@ class LaneDetection:
                            [right_predict[partial_h], partial_h],
                            [right_predict[0], 0]]]
                 
-                pts = np.array(pts_ls, dtype=np.int32)
-                               
+                # Polygon
+                pts = np.array(pts_ls, dtype=np.int32)               
                 cv2.fillPoly(overlay, np.array(pts_ls, dtype=np.int32), (255,255,0))
                 frame = cv2.addWeighted(overlay, .2, frame, 1 - .2, 0)
                 
@@ -257,6 +298,7 @@ class LaneDetection:
                 cv2.fillPoly(overlay2, pts, (255,255,0))
                 orig_frame = cv2.addWeighted(overlay2, .2, orig_frame, 1 - .2, 0)
                 
+                # Arrows
                 for arrow_ind in range(20):
                     if start + arr_res >= h:
                         break
@@ -273,70 +315,114 @@ class LaneDetection:
                         start += 10
                     prev_arrow = not prev_arrow            
         
-        
+        # Text
         cv2.putText(orig_frame, text, (text_x, 150), cv2.FONT_HERSHEY_SIMPLEX, 3, (150, 0, 150), 2)        
         cv2.imshow("lane", frame)
         return orig_frame
 
-
+#<=============================== Main ===================================>#
 if __name__ == "__main__":
     system('cls')
     
-    vid_name = 'data_1/data_vid1.avi'
-    video_out_name = 'data_vid1_lanes'
-    D = np.array([-3.639558e-01, 1.788651e-01, 6.029694e-04, -3.922424e-04, -5.382460e-02])
-    K = np.array([[9.037596e+02, 0.000000e+00, 6.957519e+02],
-                  [0.000000e+00, 9.019653e+02, 2.242509e+02], 
-                  [0.000000e+00, 0.000000e+00, 1.000000e+00]])
-    selected_corners = [(647, 246), (692, 246), (798, 421), (388, 421)]
-    lane_output_shape = (.6, 2.5/2)
-    bounds_x = (.5, .95)
-    bounds_y = (0, 1.5) 
-    desired_maxes = 80
-    threshold = 220
-    mid_per = .6
-    grass = True
-    
-    # vid_name = 'data_2/challenge_video.mp4'
-    # video_out_name = 'challenge_video_lanes'
-    # D = np.array([-2.42565104e-01, -4.77893070e-02, -1.31388084e-03, -8.79107779e-05, 2.20573263e-02])
-    # K = np.array([[1.15422732e+03, 0.00000000e+00, 6.71627794e+02],
-    #               [0.00000000e+00, 1.14818221e+03, 3.86046312e+02],
-    #               [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]])
-    # selected_corners = [(657, 455), (713, 455), (963, 645), (381, 645)]
-    # lane_output_shape = (.3, .6)
-    # bounds_x = (.1, .50)
-    # bounds_y = (0, 1)
-    # desired_maxes = 140
-    # threshold = 175
-    # mid_per = .4
-    # grass = False
-    
-    # This function takes all of the images and patches them into a video. It then saves the resulting video. Therefore,
-    # this function must only be run if the video has not been generated yet 
-    # VideoHandler.gen_video_frm_imgs(vid_name, 'data_1/data', 10, 302, '.png', 10)
-    
-    lane_detector = LaneDetection(desired_maxes, threshold, mid_per, grass)
-    handle = LaneDetectionHandler(vid_name, video_out_name, 100, K, D, lane_output_shape=lane_output_shape)
-    
-    # These two lines bring up a prompt that allows the user to pick coordinates for the corners
-    # handle.get_lane_corners(scale=100)
-    
-    
-    handle.set_projective_transform(selected_corners, bounds_x, bounds_y)
-    
-    def body(frame):
-        frame = lane_detector.detect_lanes(frame)
-        cv2.imshow("img", frame)
-        return frame
+    # Run easier video, vid1
+    if len(sys.argv) == 1:
+        print("Starting the vid1 lane detection.")
+        print("Select toggle 's' to pause/unpause the video between each frame")
         
-    handle.run(body)
+        vid_name = 'data_1/data_vid1.avi'
+        video_out_name = 'data_vid1_lanes'
+        D = np.array([-3.639558e-01, 1.788651e-01, 6.029694e-04, -3.922424e-04, -5.382460e-02])
+        K = np.array([[9.037596e+02, 0.000000e+00, 6.957519e+02],
+                    [0.000000e+00, 9.019653e+02, 2.242509e+02], 
+                    [0.000000e+00, 0.000000e+00, 1.000000e+00]])
+        selected_corners = [(647, 246), (692, 246), (798, 421), (388, 421)]
+        lane_output_shape = (.6, 2.5/2)
+        bounds_x = (.5, .95)
+        bounds_y = (0, 1.5) 
+        desired_maxes = 80
+        threshold = 220
+        mid_per = .6
+        grass = True   
+            
+        lane_detector = LaneDetection(desired_maxes, threshold, mid_per, grass)
+        handle = LaneDetectionHandler(vid_name, video_out_name, 100, K, D, lane_output_shape=lane_output_shape)      
+        handle.set_projective_transform(selected_corners, bounds_x, bounds_y)
+        
+        def body(frame):
+            frame = lane_detector.detect_lanes(frame)
+            cv2.imshow("img", frame)
+            return frame
+            
+        handle.run(body)
+        
+    elif len(sys.argv) == 2:   
+        # Run the define lane corners script  
+        if sys.argv[-1] == "def_lane_corners":
+            vid_name = 'data_1/data_vid1.avi'
+            video_out_name = 'data_vid1_lanes'
+            D = np.array([-3.639558e-01, 1.788651e-01, 6.029694e-04, -3.922424e-04, -5.382460e-02])
+            K = np.array([[9.037596e+02, 0.000000e+00, 6.957519e+02],
+                        [0.000000e+00, 9.019653e+02, 2.242509e+02], 
+                        [0.000000e+00, 0.000000e+00, 1.000000e+00]])
+            lane_output_shape = (.6, 2.5/2)
+            handle = LaneDetectionHandler(vid_name, video_out_name, 100, K, D, lane_output_shape=lane_output_shape)
     
-    
-    
-    
-    
-    
-    
-    
-    
+            # These two lines bring up a prompt that allows the user to pick coordinates for the corners
+            handle.get_lane_corners(scale=100)
+            # Note that these corners must be copy/pasted into the "selected_corners" var
+        
+        # Generate the video from images
+        elif sys.argv[-1] == "gen_video":
+            print("Generate video from images.")
+            # This function takes all of the images and patches them into a video. It then saves the resulting video. Therefore,
+            # this function must only be run if the video has not been generated yet 
+            vid_name = 'data_1/data_vid1.avi'
+            VideoHandler.gen_video_frm_imgs(vid_name, 'data_1/data', 10, 302, '.png', 10)
+          
+        # Run the challenge video lane detection
+        else:
+            print("Starting the challenge video lane detection.")
+            print("Select toggle 's' to pause/unpause the video between each frame")
+            
+            # Harder video
+            vid_name = 'data_2/challenge_video.mp4'
+            video_out_name = 'challenge_video_lanes'
+            D = np.array([-2.42565104e-01, -4.77893070e-02, -1.31388084e-03, -8.79107779e-05, 2.20573263e-02])
+            K = np.array([[1.15422732e+03, 0.00000000e+00, 6.71627794e+02],
+                          [0.00000000e+00, 1.14818221e+03, 3.86046312e+02],
+                          [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]])
+            selected_corners = [(657, 455), (713, 455), (963, 645), (381, 645)]
+            lane_output_shape = (.3, .6)
+            bounds_x = (.1, .50)
+            bounds_y = (0, 1)
+            desired_maxes = 140
+            threshold = 175
+            mid_per = .4
+            grass = False
+            
+            lane_detector = LaneDetection(desired_maxes, threshold, mid_per, grass)
+            handle = LaneDetectionHandler(vid_name, video_out_name, 100, K, D, lane_output_shape=lane_output_shape)      
+            handle.set_projective_transform(selected_corners, bounds_x, bounds_y)
+            
+            def body(frame):
+                frame = lane_detector.detect_lanes(frame)
+                cv2.imshow("img", frame)
+                return frame
+                
+            handle.run(body)
+        
+    # Define challenge video lane corners
+    elif np.any(np.array(sys.argv) == 'challenge') and np.any(np.array(sys.argv) == 'def_lane_corners'):
+        vid_name = 'data_2/challenge_video.mp4'
+        video_out_name = 'challenge_video_lanes'
+        D = np.array([-2.42565104e-01, -4.77893070e-02, -1.31388084e-03, -8.79107779e-05, 2.20573263e-02])
+        K = np.array([[1.15422732e+03, 0.00000000e+00, 6.71627794e+02],
+                        [0.00000000e+00, 1.14818221e+03, 3.86046312e+02],
+                        [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]])
+        
+        lane_output_shape = (.3, .6)
+        handle = LaneDetectionHandler(vid_name, video_out_name, 100, K, D, lane_output_shape=lane_output_shape)
+
+        # These two lines bring up a prompt that allows the user to pick coordinates for the corners
+        handle.get_lane_corners(scale=100)
+        # Note that these corners must be copy/pasted into the "selected_corners" var
