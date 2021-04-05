@@ -63,3 +63,5 @@ python lane_detection.py challenge def_lane_corners
 ```bash
 python lane_detection.py gen_video
 ```
+
+Google drive link: https://drive.google.com/file/d/1PzHiNrufgPPxtGy0a7LFq5cR81-JrZWi/view?usp=sharing
